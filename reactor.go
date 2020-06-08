@@ -1,11 +1,14 @@
 package netevent
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"runtime"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 var (
@@ -40,7 +43,7 @@ func (p *_reactor) CallPeriodly(millisecond int, lc func() error) {
 	p.period_timer = append(p.period_timer, calling)
 }
 
-func (p *_reactor) Run() {
+func (p *_reactor) Run(ctx context.Context, fn context.CancelFunc) {
 	runtime.GOMAXPROCS(len(p.udp_conn) + len(p.unix_conn))
 	for port, l := range p.udp_conn {
 		go handleUdpConnection(l, p.udp_listeners[port])
@@ -49,10 +52,10 @@ func (p *_reactor) Run() {
 		go handleUnixConnection(l, p.unix_listeners[addr])
 	}
 	for addr, l := range p.tcp_listeners {
-		go handleTcpListener(l, p.tcp_clients[addr])
+		go handleTcpListener(l, p.tcp_clients[addr], ctx, fn)
 	}
 	for dev, l := range p.serial_conn {
-		go handleSerialConnection(l, p.serial_listeners[dev])
+		go handleSerialConnection(l, p.serial_listeners[dev], ctx, fn)
 	}
 	go func() {
 		for len(p.timer) > 0 {
@@ -73,6 +76,8 @@ func (p *_reactor) Run() {
 		select {
 		case <-listening_chan:
 			fmt.Println("--------")
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -117,16 +122,23 @@ func handleUdpConnection(conn *net.UDPConn, client UdpClient) {
 	}
 }
 
-func handleSerialConnection(rw io.ReadWriteCloser, client SerialClient) {
+func handleSerialConnection(rw io.ReadWriteCloser, client SerialClient, ctx context.Context, fn context.CancelFunc) {
+	go func() {
+		select {
+		case <-ctx.Done():
+			rw.Close()
+			fn()
+		}
+	}()
 	for {
-		data := make([]byte, 1)
+		data := make([]byte, 100)
 		read_length, err := rw.Read(data)
 		if err != nil { // EOF, or worse
 			return
 		}
 		if read_length > 0 {
-			go panicWrapping(func() {
-				client.DataReceived(data)
+			panicWrapping(func() {
+				client.DataReceived(data[:read_length])
 			})
 		}
 	}
@@ -139,29 +151,54 @@ func panicWrapping(f func()) {
 	f()
 }
 
-func handleTcpListener(listener *net.TCPListener, client TcpClient) {
+func handleTcpListener(listener net.Listener, client TcpClient, ctx context.Context, fn context.CancelFunc) {
+	var isRunning = true
+	go func() {
+		select {
+		case <-ctx.Done():
+			listener.Close()
+			fn()
+			isRunning = false
+		}
+	}()
 	for {
 		data := make([]byte, 1024)
-		conn, err := listener.AcceptTCP()
+		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println(err)
-			continue
+			if ec, ok := client.(ErrorHandler); ok {
+				go ec.OnError(err)
+			}
+			if isRunning {
+				continue
+			} else {
+				return
+			}
 		}
-		read_length, err := conn.Read(data[0:])
-		if err != nil { // EOF, or worse
-			fmt.Println(err)
-			continue
-		}
-		if read_length > 0 {
-			go panicWrapping(func() {
-				handleOneTcpConnect(client, data[0:read_length], conn)
-			})
-		}
+		go func(conn net.Conn) {
+			for {
+				readLength, err := conn.Read(data[0:])
+				if err != nil { // EOF, or worse
+					if ec, ok := client.(ErrorHandler); ok {
+						glog.Errorln(err)
+						go ec.OnError(err)
+					}
+					return
+				}
+				if !isRunning {
+					conn.Close()
+					return
+				}
+				if readLength > 0 {
+					go panicWrapping(func() {
+						handleOneTcpConnect(client, data[0:readLength], conn)
+					})
+				}
+			}
+		}(conn)
 	}
 }
 
-func handleOneTcpConnect(client TcpClient, data []byte, conn *net.TCPConn) {
-	defer conn.Close()
+func handleOneTcpConnect(client TcpClient, data []byte, conn net.Conn) {
 	client.DataReceived(data, conn)
 }
 

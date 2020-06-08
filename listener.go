@@ -2,7 +2,6 @@ package netevent
 
 import (
 	"net"
-	"io"
 )
 
 type UdpClient interface {
@@ -15,12 +14,13 @@ type UnixHandler interface {
 }
 
 type TcpClient interface {
-	DataReceived(data []byte, conn *net.TCPConn)
-	SetTcpTransport(Transport)
+	DataReceived(data []byte, conn net.Conn)
+}
+
+type ErrorHandler interface {
+	OnError(error)
 }
 
 type SerialClient interface {
 	DataReceived(data []byte)
-	SetSerialIO(rw io.ReadWriteCloser)
 }
-	
