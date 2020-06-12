@@ -8,10 +8,6 @@ type TcpHandler struct {
 	tcptransport Transport
 }
 
-func (p *UdpHandler) SetUdpTransport(transport Transport) {
-	p.udptransport = transport
-}
-
 func (p *TcpHandler) SetTcpTransport(transport Transport) {
 	p.tcptransport = transport
 }

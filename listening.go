@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 
@@ -45,13 +46,13 @@ func (p *_reactor) ListenUnix(addr string, unix UnixHandler) {
 	}
 }
 
-func (p *_reactor) DialUdp(server string, port int, udp UdpClient) {
+func (p *_reactor) DialUdp(server string, port int, udp UdpClient) (*net.UDPConn, error) {
 	laddr, err := net.ResolveUDPAddr("udp", server+":"+strconv.Itoa(port))
 	if err == nil {
-		p.dialUdp(laddr, udp)
+		return p.dialUdp(laddr, udp)
 	} else {
-		fmt.Println("resolve addr err")
-		return
+		log.Println("resolve addr err")
+		return nil, err
 	}
 }
 
@@ -80,19 +81,17 @@ func (p *_reactor) ListenTCP(ctx context.Context, port int, tcp TcpClient) (err 
 
 //function for inner-file usage
 //helper function for the udp listening of ipv4 and ipv6
-func (p *_reactor) dialUdp(addr *net.UDPAddr, udp UdpClient) {
+func (p *_reactor) dialUdp(addr *net.UDPAddr, udp UdpClient) (c *net.UDPConn, err error) {
 	p.initReactor()
 	p.udp_listeners[addr.Port] = udp
 	fmt.Println("connect to" + addr.String())
-	c, erl := net.DialUDP("udp", nil, addr)
-	if erl != nil {
-		fmt.Printf("type: %T; value: %q\n", erl, erl)
+	c, err = net.DialUDP("udp", nil, addr)
+	if err != nil {
+		log.Printf("type: %T; value: %q\n", err, err)
 	} else {
 		p.udp_conn[addr.Port] = c
 	}
-	transport := new(udpTransport)
-	transport.setConn(c)
-	udp.SetUdpTransport(transport)
+	return
 }
 
 //function for inner-file usage
@@ -107,9 +106,6 @@ func (p *_reactor) listenUdp(addr *net.UDPAddr, udp UdpClient) {
 	} else {
 		p.udp_conn[addr.Port] = c
 	}
-	transport := new(udpTransport)
-	transport.setConn(c)
-	udp.SetUdpTransport(transport)
 }
 
 func (p *_reactor) ListenSerial(dev string, client SerialClient, baud int) (rw io.ReadWriteCloser, err error) {

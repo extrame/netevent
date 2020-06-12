@@ -6,7 +6,6 @@ import (
 
 type UdpClient interface {
 	DatagramReceived(data []byte, addr net.Addr)
-	SetUdpTransport(Transport)
 }
 
 type UnixHandler interface {
