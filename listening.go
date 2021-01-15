@@ -143,12 +143,12 @@ func (p *_reactor) ListenSerial(dev string, client SerialClient, baud int) (rw i
 	p.initReactor()
 	p.serial_listeners[dev] = client
 	fmt.Printf("listening on %s with (%d) Bund\n", dev, baud)
-	var s *serial.SerialPort
-	s, err = serial.OpenPort(dev, &serial.Mode{
+	var s serial.Port
+	s, err = serial.Open(dev, &serial.Mode{
 		BaudRate: baud,
 		DataBits: 8,
-		Parity:   serial.PARITY_NONE,
-		StopBits: serial.STOPBITS_ONE,
+		Parity:   serial.NoParity,
+		StopBits: serial.OneStopBit,
 	})
 	if err == nil {
 		p.serial_conn[dev] = s
