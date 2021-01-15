@@ -12,16 +12,21 @@ import (
 )
 
 type _reactor struct {
-	udp_listeners    map[int]UdpClient
-	tcp_clients      map[int]TcpClient
-	unix_listeners   map[string]UnixHandler
-	udp_conn         map[int]*net.UDPConn
-	tcp_listeners    map[int]net.Listener
-	unix_conn        map[string]*net.UnixListener
-	timer            []*LaterCalling
-	period_timer     []*LaterCalling
+	udp_listeners map[int]UdpClient
+	udp_conn      map[int]*net.UDPConn
+
+	tcp_clients   map[string]TcpClient
+	tcp_listeners map[string]net.Listener
+	tcp_conn      map[string]*net.TCPConn
+
+	unix_listeners map[string]UnixHandler
+	unix_conn      map[string]*net.UnixListener
+
 	serial_listeners map[string]SerialClient
 	serial_conn      map[string]io.ReadWriteCloser
+
+	timer        []*LaterCalling
+	period_timer []*LaterCalling
 }
 
 func (p *_reactor) ListenUnix(addr string, unix UnixHandler) {
@@ -56,6 +61,16 @@ func (p *_reactor) DialUdp(server string, port int, udp UdpClient) (*net.UDPConn
 	}
 }
 
+func (p *_reactor) DialTcp(server string, port int, tcp TcpClient) (*net.TCPConn, error) {
+	laddr, err := net.ResolveTCPAddr("tcp", server+":"+strconv.Itoa(port))
+	if err == nil {
+		return p.dialTcp(laddr, tcp)
+	} else {
+		log.Println("resolve addr err")
+		return nil, err
+	}
+}
+
 func (p *_reactor) ListenUdp(port int, udp UdpClient) {
 	laddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(port))
 	if err == nil {
@@ -68,13 +83,14 @@ func (p *_reactor) ListenUdp(port int, udp UdpClient) {
 
 func (p *_reactor) ListenTCP(ctx context.Context, port int, tcp TcpClient) (err error) {
 	p.initReactor()
-	p.tcp_clients[port] = tcp
-	fmt.Println("listening on " + strconv.Itoa(port))
+	addr := ":" + strconv.Itoa(port)
+	p.tcp_clients[addr] = tcp
+	fmt.Println("listening on " + addr)
 	var c net.Listener
 	var lc net.ListenConfig
-	c, err = lc.Listen(ctx, "tcp", ":"+strconv.Itoa(port))
+	c, err = lc.Listen(ctx, "tcp", addr)
 	if err == nil {
-		p.tcp_listeners[port] = c
+		p.tcp_listeners[addr] = c
 	}
 	return err
 }
@@ -90,6 +106,21 @@ func (p *_reactor) dialUdp(addr *net.UDPAddr, udp UdpClient) (c *net.UDPConn, er
 		log.Printf("type: %T; value: %q\n", err, err)
 	} else {
 		p.udp_conn[addr.Port] = c
+	}
+	return
+}
+
+//function for inner-file usage
+//helper function for the udp listening of ipv4 and ipv6
+func (p *_reactor) dialTcp(addr *net.TCPAddr, tcp TcpClient) (c *net.TCPConn, err error) {
+	p.initReactor()
+	p.tcp_clients[addr.String()] = tcp
+	fmt.Println("connect to" + addr.String())
+	c, err = net.DialTCP("tcp", nil, addr)
+	if err != nil {
+		log.Printf("type: %T; value: %q\n", err, err)
+	} else {
+		p.tcp_conn[addr.String()] = c
 	}
 	return
 }
@@ -134,10 +165,13 @@ func (p *_reactor) initReactor() {
 		p.udp_conn = make(map[int]*net.UDPConn)
 	}
 	if p.tcp_clients == nil {
-		p.tcp_clients = make(map[int]TcpClient)
+		p.tcp_clients = make(map[string]TcpClient)
 	}
 	if p.tcp_listeners == nil {
-		p.tcp_listeners = make(map[int]net.Listener)
+		p.tcp_listeners = make(map[string]net.Listener)
+	}
+	if p.tcp_conn == nil {
+		p.tcp_conn = make(map[string]*net.TCPConn)
 	}
 	if p.serial_listeners == nil {
 		p.serial_listeners = make(map[string]SerialClient)

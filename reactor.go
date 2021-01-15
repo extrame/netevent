@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"runtime"
 	"time"
 
 	"github.com/golang/glog"
@@ -44,9 +43,11 @@ func (p *_reactor) CallPeriodly(millisecond int, lc func() error) {
 }
 
 func (p *_reactor) Run(ctx context.Context, fn context.CancelFunc) {
-	runtime.GOMAXPROCS(len(p.udp_conn) + len(p.unix_conn))
 	for port, l := range p.udp_conn {
 		go handleUdpConnection(l, p.udp_listeners[port])
+	}
+	for port, l := range p.tcp_conn {
+		go handleTcpConnection(l, p.tcp_clients[port])
 	}
 	for addr, l := range p.unix_conn {
 		go handleUnixConnection(l, p.unix_listeners[addr])
@@ -117,6 +118,21 @@ func handleUdpConnection(conn *net.UDPConn, client UdpClient) {
 		if read_length > 0 {
 			go panicWrapping(func() {
 				client.DatagramReceived(data[0:read_length], remoteAddr)
+			})
+		}
+	}
+}
+
+func handleTcpConnection(conn *net.TCPConn, client TcpClient) {
+	for {
+		data := make([]byte, 512)
+		read_length, err := conn.Read(data[0:])
+		if err != nil { // EOF, or worse
+			return
+		}
+		if read_length > 0 {
+			go panicWrapping(func() {
+				client.DataReceived(data[0:read_length], conn)
 			})
 		}
 	}
